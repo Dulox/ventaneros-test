@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<title>Prueba Ventaneros API</title>
+<style>
+  body{font-family:Arial,sans-serif;max-width:640px;margin:40px auto;padding:0 20px;background:#f5f5f5}
+  h1{color:#1a73e8}
+  .card{background:#fff;border-radius:10px;padding:20px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+  label{display:block;font-size:12px;font-weight:600;color:#555;margin-bottom:4px;margin-top:10px}
+  input{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:6px;font-size:14px;box-sizing:border-box}
+  button{background:#1a73e8;color:#fff;border:none;padding:10px 18px;border-radius:6px;font-size:14px;cursor:pointer;margin-top:14px}
+  button:hover{background:#1557b0}
+  pre{background:#202124;color:#0f0;padding:12px;border-radius:6px;overflow-x:auto;font-size:12px;white-space:pre-wrap}
+  .step{font-weight:700;color:#1a73e8;margin-bottom:6px}
+</style>
+</head>
+<body>
+  <h1>🪟 Prueba Ventaneros API</h1>
+
+  <div class="card">
+    <div class="step">Paso 1 — Configuración (ya está rellenado)</div>
+    <label>Supabase URL</label>
+    <input id="supaUrl" value="https://opoumjothkwxulkviaeq.supabase.co"/>
+    <label>Publishable Key (anon)</label>
+    <input id="publishableKey" placeholder="Pega aquí tu Publishable key"/>
+    <label>Railway API URL</label>
+    <input id="apiUrl" value="https://ventaneros-backend-production.up.railway.app"/>
+  </div>
+
+  <div class="card">
+    <div class="step">Paso 2 — Iniciar sesión con tu usuario de prueba</div>
+    <label>Email</label>
+    <input id="email" placeholder="tu_email@ejemplo.com"/>
+    <label>Contraseña</label>
+    <input id="password" type="password" placeholder="tu contraseña"/>
+    <button onclick="login()">Iniciar sesión y obtener token</button>
+    <pre id="loginResult">Aquí aparecerá el resultado...</pre>
+  </div>
+
+  <div class="card">
+    <div class="step">Paso 3 — Probar el cálculo (Corrediza 48x60)</div>
+    <button onclick="testCalc()">Calcular Corrediza de prueba</button>
+    <pre id="calcResult">Primero inicia sesión arriba...</pre>
+  </div>
+
+  <div class="card">
+    <div class="step">Paso 4 — Probar PDF de orden</div>
+    <button onclick="testPdf()">Generar PDF de orden de prueba</button>
+    <pre id="pdfResult">Primero corre el cálculo arriba...</pre>
+  </div>
+
+<script>
+let accessToken = null;
+let lastCalcResult = null;
+
+async function login() {
+  const supaUrl = document.getElementById('supaUrl').value;
+  const key = document.getElementById('publishableKey').value;
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  const out = document.getElementById('loginResult');
+  out.textContent = "Conectando...";
+  try {
+    const res = await fetch(`${supaUrl}/auth/v1/token?grant_type=password`, {
+      method: "POST",
+      headers: { "apikey": key, "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json();
+    if (data.access_token) {
+      accessToken = data.access_token;
+      out.textContent = "✅ LOGIN EXITOSO\n\nToken obtenido (primeros 40 caracteres):\n" + accessToken.slice(0,40) + "...";
+    } else {
+      out.textContent = "❌ ERROR:\n" + JSON.stringify(data, null, 2);
+    }
+  } catch(e) {
+    out.textContent = "❌ ERROR DE RED:\n" + e.message;
+  }
+}
+
+async function testCalc() {
+  const apiUrl = document.getElementById('apiUrl').value;
+  const out = document.getElementById('calcResult');
+  if (!accessToken) { out.textContent = "⚠️ Primero inicia sesión en el Paso 2."; return; }
+  out.textContent = "Calculando...";
+  try {
+    const res = await fetch(`${apiUrl}/api/calc`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + accessToken
+      },
+      body: JSON.stringify({
+        tipo: "cor", ancho: 48, alto: 60, unidad: "Pulgadas",
+        cantidad: 4, material: "Natural", vidrio: "Natural transparente", hojas: 2
+      })
+    });
+    const data = await res.json();
+    out.textContent = `Status: ${res.status}\n\n` + JSON.stringify(data, null, 2);
+    if (res.ok) { lastCalcResult = data; }
+  } catch(e) {
+    out.textContent = "❌ ERROR DE RED:\n" + e.message;
+  }
+}
+
+async function testPdf() {
+  const apiUrl = document.getElementById('apiUrl').value;
+  const out = document.getElementById('pdfResult');
+  if (!accessToken) { out.textContent = "⚠️ Primero inicia sesión en el Paso 2."; return; }
+  if (!lastCalcResult) { out.textContent = "⚠️ Primero corre el cálculo en el Paso 3."; return; }
+  out.textContent = "Generando PDF...";
+  try {
+    const res = await fetch(`${apiUrl}/api/pdf/orden`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + accessToken
+      },
+      body: JSON.stringify({
+        lines: [lastCalcResult],
+        info: { numero: "TEST-001", cliente: "Cliente de Prueba", proyecto: "Prueba del sistema", responsable: "Test", entrega: "2026-07-01", notas: "Orden de prueba" }
+      })
+    });
+    if (res.ok) {
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "orden-prueba.pdf";
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      out.textContent = "✅ PDF generado y descargado correctamente!";
+    } else {
+      const data = await res.json();
+      out.textContent = `Status: ${res.status}\n\n` + JSON.stringify(data, null, 2);
+    }
+  } catch(e) {
+    out.textContent = "❌ ERROR DE RED:\n" + e.message;
+  }
+}
+</script>
+</body>
+</html>
